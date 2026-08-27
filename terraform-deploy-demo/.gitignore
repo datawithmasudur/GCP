@@ -1,0 +1,18 @@
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+# *.tfvars
+*.tfplan
+crash.log
+override.tf
+override.tf.json
+
+# Secrets
+*.json
+*.pem
+*.key
+
+#ignore local powershell script
+local_activate.ps1

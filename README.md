@@ -6,3 +6,5 @@ Videos:
 
 01 - BigQuery
 02 - Data-Upload
+03 - Dataflow Tutorials
+04 - Terraform

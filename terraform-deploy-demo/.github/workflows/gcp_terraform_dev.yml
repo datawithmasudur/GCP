@@ -1,0 +1,145 @@
+name: GCP Terraform DEV Pipeline
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write   # This is for Git tag
+  id-token: write   # This is for Workload Identity Federation
+
+env:
+  TF_VERSION: "1.14.8"
+  WORKING_DIR: "./terraform"
+  ENVIRONMENT: "dev"
+
+jobs:
+  plan:
+    name: Plan (DEV)
+    runs-on: ubuntu-latest
+    environment: dev
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+
+    steps:
+      # Checkout the repository to the GitHub Actions runner
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Authenticate to GCP using WIF
+      - name: Auth GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: "projects/4207364200/locations/global/workloadIdentityPools/github-pool/providers/github-provider-id"
+          service_account: "terraform-deploy-sa@YOUR-PROJECT-ID.iam.gserviceaccount.com"
+          token_format: "access_token"
+          access_token_lifetime: "900s"  # 15 minutes
+
+       # Install the latest version of Terraform CLI and configure the Terraform CLI configuration file
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # Initialize a new or existing Terraform working directory by creating initial files, loading any remote state, downloading modules, etc.
+      - name: Init
+        run: |
+          terraform init \
+            -backend-config=backend/${{ env.ENVIRONMENT }}.hcl
+
+      # Checks that all Terraform configuration files adhere to a canonical format
+      - name: Format Check
+        run: terraform fmt -check
+
+      # Validate Terraform code
+      - name: Validate
+        run: terraform validate
+
+      # Generates an execution plan for Terraform
+      - name: Plan
+        run: |
+          terraform plan \
+            -var-file="envs/dev.tfvars" \
+            -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
+            -out=tfplan
+
+      # Upload the plan artifact to repository artifact registry so same plan can be used by apply job
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-dev
+          path: ${{ env.WORKING_DIR }}/tfplan
+          retention-days: 1
+
+  apply:
+    name: Apply & Tag (DEV)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write   # This is for Workload Identity Federation
+    environment: dev
+    needs: plan
+    # only runs on merge to main, not on PRs or feature pushes
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Auth GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: "projects/4207364200/locations/global/workloadIdentityPools/github-pool/providers/github-provider-id"
+          service_account: "terraform-deploy-sa@YOUR-PROJECT-ID.iam.gserviceaccount.com"
+          token_format: "access_token"
+          access_token_lifetime: "900s"  # 15 minutes
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Init
+        run: |
+          terraform init \
+            -backend-config=backend/${{ env.ENVIRONMENT }}.hcl
+
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-dev
+          path: ${{ env.WORKING_DIR }}
+
+      - name: Apply
+        run: terraform apply -auto-approve tfplan
+
+      # after successful apply, generate next sequence tag
+      # format: dev-1, dev-2, dev-3 ...
+      - name: Generate and Push Tag
+        run: |
+          git fetch --tags
+
+          # get the latest dev tag number
+          LATEST=$(git tag --list 'dev-*' --sort=-version:refname | head -n 1)
+
+          if [ -z "$LATEST" ]; then
+            NEW_TAG="dev-1"
+          else
+            NUM="${LATEST#dev-}"
+            NEW_TAG="dev-$((NUM + 1))"
+          fi
+
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag $NEW_TAG
+          git push origin $NEW_TAG
+
+          echo "Tagged: $NEW_TAG"
