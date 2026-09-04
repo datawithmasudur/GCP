@@ -40,7 +40,7 @@ def run():
         results = (
             pipeline
             | 'Read from PubSub' >> beam.io.ReadFromPubSub(
-                subscription='projects/upbeat-math-480123-r1/subscriptions/sales-events-sub')
+                subscription='projects/YOUR-PROJECT-ID/subscriptions/sales-events-sub')
             | 'Parse and Validate' >> beam.ParDo(ParseMessage()).with_outputs(
                 GOOD_TAG, BAD_TAG)
         )
@@ -51,7 +51,7 @@ def run():
         (
             good_data
             | 'Write Good to BigQuery' >> beam.io.WriteToBigQuery(
-                'upbeat-math-480123-r1:sales_dataset.streaming_sales',
+                'YOUR-PROJECT-ID:sales_dataset.streaming_sales',
                 schema=good_schema,
                 write_disposition=beam.io.BigQueryDisposition.WRITE_APPEND,
                 create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
@@ -62,7 +62,7 @@ def run():
         (
             bad_data
             | 'Write Bad to Dead Letter Table' >> beam.io.WriteToBigQuery(
-                'upbeat-math-480123-r1:sales_dataset.sales_dead_letter',
+                'YOUR-PROJECT-ID:sales_dataset.sales_dead_letter',
                 schema=bad_schema,
                 write_disposition=beam.io.BigQueryDisposition.WRITE_APPEND,
                 create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
